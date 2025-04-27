@@ -37,7 +37,7 @@ except AttributeError as ae:
 # --- Configuration ---
 YOLO_MODEL_PATH = "best.pt"
 ENCODING_FILE = "encodings_deepface.pkl"
-STUDENT_CSV = "student_info/student_data.csv"
+STUDENT_CSV = "students_info/student_data.csv"
 
 # --- OpenCV DNN Face Detector Configuration ---
 PROTOTXT_PATH = "deploy.prototxt"
