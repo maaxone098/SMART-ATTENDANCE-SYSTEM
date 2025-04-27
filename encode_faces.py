@@ -28,10 +28,10 @@ from deepface import DeepFace
 
 # --- Configuration ---
 # Path to the directory containing student image folders
-IMAGE_DIR = "dataset/student_images"
+IMAGE_DIR = "student_info/dataset/student_images"
 
 # Path to the student data CSV file (optional but good for validation)
-STUDENT_CSV = "student_data.csv"
+STUDENT_CSV = "student_info/student_data.csv"
 
 # Output file to save the encodings (embeddings) and names
 ENCODING_FILE = "encodings_deepface.pkl" # Changed filename slightly
