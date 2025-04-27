@@ -37,7 +37,7 @@ except AttributeError as ae:
 # --- Configuration ---
 YOLO_MODEL_PATH = "best.pt"
 ENCODING_FILE = "encodings_deepface.pkl"
-STUDENT_CSV = "student_data.csv"
+STUDENT_CSV = "student_info/student_data.csv"
 
 # --- OpenCV DNN Face Detector Configuration ---
 PROTOTXT_PATH = "deploy.prototxt"
@@ -50,9 +50,9 @@ DISTANCE_METRIC = "cosine" # Options: 'cosine', 'euclidean', 'euclidean_l2'
 RECOGNITION_THRESHOLD = 0.50 # Adjust based on testing (Cosine: lower is better)
 
 # --- Camera Configuration ---
-CAMERA_INDEX = 0 # 0 for default, 1, 2 for others, or RTSP/HTTP URL string
-DESIRED_WIDTH = 2560 # Request 2560 pixels width (2K/QHD) <<< Changed
-DESIRED_HEIGHT = 1440 # Request 1440 pixels height (2K/QHD) <<< Changed
+CAMERA_INDEX = 1 # 0 for default, 1, 2 for others, or RTSP/HTTP URL string
+DESIRED_WIDTH = 800 # Request 2560 pixels width (2K/QHD) <<< Changed
+DESIRED_HEIGHT = 600 # Request 1440 pixels height (2K/QHD) <<< Changed
 
 # --- Attendance & Feature Flags ---
 ATTENDANCE_SESSION_DURATION = 60 * 60
@@ -62,8 +62,8 @@ RECORDING_FPS = 30 # Set desired recording FPS (camera/processing might limit ac
 
 # --- Output Directories ---
 SNAPSHOT_DIR = "attendance_info/snapshots"
-RECORDINGS_DIR = "attendance_inforecordings"
-REPORTS_DIR = "attendance_inforeports"
+RECORDINGS_DIR = "attendance_info/recordings"
+REPORTS_DIR = "attendance_info/reports"
 
 # --- Email Configuration ---
 EMAIL_SENDER = config.EMAIL_SENDER # Replace
