@@ -20,7 +20,7 @@ This project implements an automated attendance system that utilizes real-time f
 * **Face Detection:** Ultralytics YOLOv8 (custom trained model)
 * **Face Recognition:** DeepFace (using TensorFlow backend)
 * **Core Libraries:**
-    * OpenCV (`opencv-python`) - Camera access, image/video processing, drawing.
+    * OpenCV (`opencv-python`) - Camera access, image/video processing, drawing. 
     * NumPy - Numerical operations.
     * Pandas & Openpyxl - Data handling and Excel report generation.
     * Ultralytics - Loading and running the YOLOv8 model.
