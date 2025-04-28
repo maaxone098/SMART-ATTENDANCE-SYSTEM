@@ -30,7 +30,36 @@ This project implements an automated attendance system that utilizes real-time f
 
 ## Project Structure
 
-attendance/│├── attendance_app.py           # Main real-time application script├── encode_faces.py             # Script to generate face embeddings├── requirements.txt            # Python package dependencies├── config.py                   # (Recommended) For storing email credentials securely├── student_data.csv            # CSV file with StudentID, Name, EmailAddress├── .gitignore                  # Git ignore file├── README.md                   # This file│├── dataset/                    # Folder for training/encoding data│   └── student_images/         # Contains subfolders for each student│       ├── StudentID_Name1/    # Folder for student 1│       │   ├── image1.jpg│       │   └── image2.png│       └── StudentID_Name2/    # Folder for student 2│           └── image1.jpg│├── models/                     # (Recommended) Place downloaded models here│   ├── best.pt                 # Your trained YOLOv8 model weights│   ├── deploy.prototxt         # OpenCV DNN model structure│   └── res10_300x300_ssd_iter_140000.caffemodel # OpenCV DNN model weights│├── encodings_deepface.pkl      # Output file from encode_faces.py│├── reports/                    # Output directory for Excel reports (created automatically)├── recordings/                 # Output directory for video recordings (created automatically)├── snapshots/                  # Output directory for periodic snapshots (created automatically)│└── attendance_env_new/         # Python virtual environment (should be in .gitignore)
+attendance/
+│
+├── attendance_app.py           # Main real-time application script
+├── encode_faces.py             # Script to generate face embeddings
+├── requirements.txt            # Python package dependencies
+├── config.py                   # (Recommended) For storing email credentials securely
+├── student_data.csv            # CSV file with StudentID, Name, EmailAddress
+├── .gitignore                  # Git ignore file
+├── README.md                   # This file
+│
+├── dataset/                    # Folder for training/encoding data
+│   └── student_images/         # Contains subfolders for each student
+│       ├── StudentID_Name1/    # Folder for student 1
+│       │   ├── image1.jpg
+│       │   └── image2.png
+│       └── StudentID_Name2/    # Folder for student 2
+│           └── image1.jpg
+│
+├── best.pt                 # Your trained YOLOv8 model weights
+├── deploy.prototxt         # OpenCV DNN model structure
+└── res10_300x300_ssd_iter_140000.caffemodel # OpenCV DNN model weights
+│
+├── encodings_deepface.pkl      # Output file from encode_faces.py
+│
+├── attendance_info/
+│   └── reports/                    # Output directory for Excel reports (created automatically)
+│   └──  recordings/                 # Output directory for video recordings (created automatically)
+│   └── snapshots/                  # Output directory for periodic snapshots (created automatically)
+│
+└── attendance_env_new/         # Python virtual environment (should be in .gitignore)
 ## Setup and Usage
 
 1.  **Clone the Repository:**
