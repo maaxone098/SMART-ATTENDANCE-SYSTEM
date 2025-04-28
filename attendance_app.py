@@ -51,8 +51,9 @@ RECOGNITION_THRESHOLD = 0.50 # Adjust based on testing (Cosine: lower is better)
 
 # --- Camera Configuration ---
 CAMERA_INDEX = 1 # 0 for default, 1, 2 for others, or RTSP/HTTP URL string
-DESIRED_WIDTH = 800 # Request 2560 pixels width (2K/QHD) <<< Changed
-DESIRED_HEIGHT = 600 # Request 1440 pixels height (2K/QHD) <<< Changed
+DESIRED_WIDTH = 1920 # Request 2560 pixels width (2K/QHD) <<< Changed
+DESIRED_HEIGHT = 1080
+DISPLAY_WIDTH = 960 # Request 1440 pixels height (2K/QHD) <<< Changed
 
 # --- Attendance & Feature Flags ---
 ATTENDANCE_SESSION_DURATION = 60 * 60
@@ -318,7 +319,14 @@ while True:
     cv2.putText(frame, count_text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2, cv2.LINE_AA)
 
     # --- Display Frame ---
-    cv2.imshow('Attendance System', frame)
+    aspect_ratio = frame_height / frame_width
+    display_height = int(DISPLAY_WIDTH * aspect_ratio)
+    # Resize the frame
+    display_frame = cv2.resize(frame, (DISPLAY_WIDTH, display_height), interpolation=cv2.INTER_AREA)
+
+    # --- Display the resized frame ---
+    cv2.imshow('Attendance System', display_frame)
+    
 
     # --- Write Frame to Video ---
     if video_writer is not None:
