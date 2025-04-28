@@ -64,7 +64,7 @@ attendance/
 
 1.  **Clone the Repository:**
     ```bash
-    git clone <your-repository-url>
+    git clone [<your-repository-url>](https://github.com/maaxone098/SMART-ATTENDANCE-SYSTEM.git)
     cd <repository-name>
     ```
 
