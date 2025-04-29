@@ -51,15 +51,18 @@ RECOGNITION_THRESHOLD = 0.50 # Adjust based on testing (Cosine: lower is better)
 
 # --- Camera Configuration ---
 CAMERA_INDEX = 1 # 0 for default, 1, 2 for others, or RTSP/HTTP URL string
-DESIRED_WIDTH = 1920 # Request 2560 pixels width (2K/QHD) <<< Changed
-DESIRED_HEIGHT = 1080
-DISPLAY_WIDTH = 960 # Request 1440 pixels height (2K/QHD) <<< Changed
+DESIRED_WIDTH = 1280 # Request camera width (e.g., 1280 for 720p)
+DESIRED_HEIGHT = 720  # Request camera height (e.g., 720 for 720p)
+
+# --- Display Window Configuration ---
+DISPLAY_WIDTH = 960 # Width of the displayed window (pixels)
 
 # --- Attendance & Feature Flags ---
-ATTENDANCE_SESSION_DURATION = 60 * 60
+ATTENDANCE_SESSION_DURATION = 2 * 60 
+REQUIRED_RECOGNITION_DURATION = 1 * 60 
 HR_SESSION_ACTIVE = True
-SNAPSHOT_INTERVAL = 20 * 60 # Interval for HR snapshots (seconds)
-RECORDING_FPS = 30 # Set desired recording FPS (camera/processing might limit actual FPS)
+SNAPSHOT_INTERVAL = 1 * 60 
+RECORDING_FPS = 30 # Set desired recording FPS
 
 # --- Output Directories ---
 SNAPSHOT_DIR = "attendance_info/snapshots"
@@ -67,8 +70,8 @@ RECORDINGS_DIR = "attendance_info/recordings"
 REPORTS_DIR = "attendance_info/reports"
 
 # --- Email Configuration ---
-EMAIL_SENDER = config.EMAIL_SENDER # Replace
-EMAIL_PASSWORD = config.EMAIL_PASSWORD  # Replace with App Password
+EMAIL_SENDER = config.EMAIL_SENDER
+EMAIL_PASSWORD = config.EMAIL_PASSWORD
 EMAIL_SERVER = "smtp.gmail.com"
 EMAIL_PORT = 465
 
@@ -98,7 +101,10 @@ try:
             print("Error: No names found in encoding file.")
             exit()
         known_embeddings_np = np.array(known_embeddings_list)
-        print(f"Loaded {len(known_names)} known names/embeddings.")
+        # Ensure names used as keys are consistent (e.g., stripped)
+        unique_stripped_names = sorted(list(set(name.strip() for name in known_names)))
+        print(f"Loaded {len(unique_stripped_names)} unique known names.")
+        print(f"Total embeddings loaded: {len(known_embeddings_list)}") 
 except FileNotFoundError:
     print(f"Error: Encoding file not found at {ENCODING_FILE}")
     exit()
@@ -139,7 +145,9 @@ except cv2.error as e:
     face_detector_net = None
 
 # --- Initialize Attendance ---
-attendance_status = {name.strip(): 'Absent' for name in set(known_names)} # Use stripped names as keys
+attendance_status = {name: 'Absent' for name in unique_stripped_names}
+# Initialize duration tracking
+recognition_duration = {name: 0.0 for name in unique_stripped_names} 
 print(f"Initialized attendance for {len(attendance_status)} unique students.")
 
 # --- Initialize Snapshot Variables ---
@@ -159,11 +167,9 @@ cap.set(cv2.CAP_PROP_FRAME_WIDTH, DESIRED_WIDTH)
 cap.set(cv2.CAP_PROP_FRAME_HEIGHT, DESIRED_HEIGHT)
 
 # --- Get Actual Resolution and FPS ---
-# Read the actual width and height AFTER setting the desired ones
 frame_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
 frame_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-cam_fps = cap.get(cv2.CAP_PROP_FPS) # Get camera FPS for info
-# Use configured FPS for recording, but cap FPS if camera reports lower and non-zero
+cam_fps = cap.get(cv2.CAP_PROP_FPS)
 actual_recording_fps = RECORDING_FPS
 if cam_fps > 0 and cam_fps < RECORDING_FPS:
     print(f"Warning: Camera reported FPS ({cam_fps}) is lower than desired recording FPS ({RECORDING_FPS}). Using camera FPS for recording.")
@@ -171,25 +177,26 @@ if cam_fps > 0 and cam_fps < RECORDING_FPS:
 elif cam_fps == 0:
      print(f"Warning: Camera did not report FPS. Using configured recording FPS ({RECORDING_FPS}).")
 
-
 print(f"Actual camera resolution set to: {frame_width}x{frame_height}")
 print(f"Using recording FPS: {actual_recording_fps}")
 
 
 # --- Initialize Video Writer ---
-timestamp_vid = time.strftime("%Y-%m-%d_%H-%M-%S")
-video_filename = os.path.join(RECORDINGS_DIR, f"attendance_recording_{timestamp_vid}.mp4")
-fourcc = cv2.VideoWriter_fourcc(*'mp4v') # Or 'XVID', 'MJPG', 'avc1'
-# Use the actual frame dimensions and calculated recording FPS
+timestamp_vid = time.strftime("%Y-%m-%d_%I%M%S%p")
+video_filename = os.path.join(RECORDINGS_DIR, f"attendance_recording_{timestamp_vid}.mp4") 
+fourcc = cv2.VideoWriter_fourcc(*'mp4v') 
 video_writer = cv2.VideoWriter(video_filename, fourcc, actual_recording_fps, (frame_width, frame_height))
 if not video_writer.isOpened():
-    print(f"Error: Could not open video writer for {video_filename}. Check codec availability.")
+    print(f"Error: Could not open video writer for {video_filename} using mp4v codec.")
+    print("Ensure necessary video codecs (e.g., H.264 via ffmpeg or gstreamer) are installed and accessible by OpenCV.")
+    print("Consider switching back to 'XVID' codec and '.avi' extension if this persists.")
     video_writer = None
 else:
     print(f"Recording video to {video_filename} at {actual_recording_fps} FPS target.")
 
 
 session_start_time = time.time()
+previous_frame_time = session_start_time 
 
 # --- Helper Function for Distance Calculation ---
 def find_distance(emb1, emb2, metric=DISTANCE_METRIC):
@@ -214,7 +221,7 @@ def find_distance(emb1, emb2, metric=DISTANCE_METRIC):
 # --- Helper Function for Snapshots ---
 def take_snapshot(frame_to_save):
     """Saves the current frame as a snapshot."""
-    timestamp = time.strftime("%Y-%m-%d_%H-%M-%S")
+    timestamp = time.strftime("%Y-%m-%d_%I%M%S%p") 
     filename = os.path.join(SNAPSHOT_DIR, f"snapshot_{timestamp}.png")
     try:
         cv2.imwrite(filename, frame_to_save)
@@ -226,20 +233,23 @@ def take_snapshot(frame_to_save):
 # --- Main Loop ---
 print("Starting real-time attendance...")
 while True:
+    # --- Calculate time elapsed since last frame processing ---
+    current_frame_time = time.time()
+    time_elapsed = current_frame_time - previous_frame_time
+
     ret, frame = cap.read()
     if not ret:
-        # If reading from a file, this means end of file
-        if isinstance(CAMERA_INDEX, str): # Check if input was a file path
+        if isinstance(CAMERA_INDEX, str):
              print("End of video file reached.")
              break
-        else: # Error reading from camera
+        else:
             print("Error: Failed to grab frame from camera.")
             break
 
     # --- Face Detection with YOLOv8 ---
     yolo_results = yolo_model(frame, verbose=False)
 
-    recognized_students_in_frame = set()
+    recognized_names_this_frame = set() 
     if len(yolo_results) > 0 and hasattr(yolo_results[0], 'boxes'):
         boxes = yolo_results[0].boxes.xyxy.cpu().numpy().astype(int)
         confs = yolo_results[0].boxes.conf.cpu().numpy()
@@ -291,14 +301,23 @@ while True:
                 # --- Check if Match Exceeds Threshold ---
                 if best_match_index != -1 and min_dist < RECOGNITION_THRESHOLD:
                     # Get name from known_names list, ensuring it's stripped of spaces
-                    name = known_names[best_match_index].strip()
+                    recognized_name = known_names[best_match_index].strip()
+                    name = recognized_name 
                     color = (0, 255, 0)
-                    recognized_students_in_frame.add(name)
-                    # Update attendance using the stripped name
-                    if name in attendance_status:
-                        attendance_status[name] = 'Present'
+                    recognized_names_this_frame.add(recognized_name) 
+
+                    # --- Update Duration and Check Threshold ---
+                    if recognized_name in recognition_duration:
+                        recognition_duration[recognized_name] += time_elapsed
+                        # Check if threshold is met AND student is currently Absent
+                        if (attendance_status[recognized_name] == 'Absent' and
+                            recognition_duration[recognized_name] >= REQUIRED_RECOGNITION_DURATION):
+                            attendance_status[recognized_name] = 'Present'
+                            print(f"\n>> {recognized_name} marked PRESENT.")
                     else:
-                        print(f"Warning: Recognized name '{name}' not in initial attendance list.")
+                        # This might happen if known_names had duplicates/inconsistencies
+                        # Ensure initialization uses unique_stripped_names
+                        print(f"Warning: Recognized name '{recognized_name}' not in duration tracking list.")
 
         except ValueError as ve:
             # print(f"Debug: DeepFace ValueError on crop: {ve}")
@@ -314,21 +333,17 @@ while True:
         cv2.putText(frame, name, (x1 + 6, text_y), cv2.FONT_HERSHEY_DUPLEX, 0.8, (255, 255, 255), 1)
 
 
-    # --- Display Recognized Count ---
-    count_text = f"Recognized: {len(recognized_students_in_frame)}"
+    # --- Display Recognized Count (based on names recognized *in this frame*) ---
+    count_text = f"Recognized Now: {len(recognized_names_this_frame)}"
     cv2.putText(frame, count_text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2, cv2.LINE_AA)
 
     # --- Display Frame ---
-    aspect_ratio = frame_height / frame_width
+    aspect_ratio = frame_height / frame_width if frame_width > 0 else 1
     display_height = int(DISPLAY_WIDTH * aspect_ratio)
-    # Resize the frame
     display_frame = cv2.resize(frame, (DISPLAY_WIDTH, display_height), interpolation=cv2.INTER_AREA)
-
-    # --- Display the resized frame ---
     cv2.imshow('Attendance System', display_frame)
-    
 
-    # --- Write Frame to Video ---
+    # --- Write the *original* frame to Video ---
     if video_writer is not None:
         try:
             video_writer.write(frame)
@@ -336,22 +351,29 @@ while True:
             print(f"\nError writing frame to video: {e}")
 
     # --- Snapshot Logic ---
-    current_time = time.time()
-    if HR_SESSION_ACTIVE and (current_time - last_snapshot_time >= SNAPSHOT_INTERVAL):
+    current_time_snapshot = time.time() 
+    if HR_SESSION_ACTIVE and (current_time_snapshot - last_snapshot_time >= SNAPSHOT_INTERVAL):
          snapshot_thread = threading.Thread(target=take_snapshot, args=(frame.copy(),))
          snapshot_thread.daemon = True
          snapshot_thread.start()
-         last_snapshot_time = current_time
+         last_snapshot_time = current_time_snapshot 
 
-    # --- Exit Condition ---
+    # --- Update previous frame time for next iteration's time_elapsed calculation ---
+    previous_frame_time = current_frame_time
+
+    # --- Check for Session Timeout ---
+    if time.time() - session_start_time > ATTENDANCE_SESSION_DURATION:
+        print(f"\nAttendance session duration ({ATTENDANCE_SESSION_DURATION / 60.0:.1f} minutes) reached. Exiting...")
+        break 
+
+    # --- Exit Condition (Manual Quit) ---
     key = cv2.waitKey(1) & 0xFF
     if key == ord('q'):
-        print("Exiting application...")
+        print("Exiting application manually...")
         break
 
 # --- Cleanup ---
 cap.release()
-# Release the video writer object
 if video_writer is not None:
     video_writer.release()
     print(f"Video recording saved to {video_filename}")
@@ -361,30 +383,39 @@ print("Video capture released and windows closed.")
 # --- Generate Excel Report ---
 print("\nGenerating attendance report...")
 attendance_list = []
-unique_known_names = sorted(list(set(known_names)))
-print(f"Generating report for {len(unique_known_names)} unique names found in encodings file.")
+# Use the initial list of unique stripped names to ensure all are reported
+print(f"Generating report for {len(unique_stripped_names)} unique names found in encodings file.")
 
-for name in unique_known_names:
-     lookup_name = name.strip()
-     status = attendance_status.get(lookup_name, 'Absent')
+for name in unique_stripped_names:
+     # Status is based on the final state of attendance_status
+     status = attendance_status.get(name, 'Absent')
      student_id = 'N/A'
      email = 'N/A'
      found_in_csv = False
 
-     if df_students is not None and lookup_name in student_data:
-         student_row = df_students[df_students['Name'] == lookup_name]
+     if df_students is not None and name in student_data:
+         student_row = df_students[df_students['Name'] == name]
          if not student_row.empty:
             student_id = student_row['StudentID'].iloc[0]
             email = student_row['EmailAddress'].iloc[0]
             found_in_csv = True
 
      if not found_in_csv:
-         print(f"  DEBUG: Could not find details for '{lookup_name}' in {STUDENT_CSV}. Using N/A.")
+         print(f"  DEBUG: Could not find details for '{name}' in {STUDENT_CSV}. Using N/A.")
 
-     attendance_list.append({'StudentID': student_id, 'Name': name, 'EmailAddress': email, 'Status': status})
+     # Get final recorded duration
+     duration_seen = recognition_duration.get(name, 0.0)
+     duration_min = duration_seen / 60.0
+
+     # Add ONLY duration in minutes to the report
+     attendance_list.append({'StudentID': student_id, 'Name': name,
+                             'EmailAddress': email, 'Status': status,
+                             'DurationSeen_min': round(duration_min, 2)})
+
 
 df_report = pd.DataFrame(attendance_list)
-timestamp = time.strftime("%Y-%m-%d_%H-%M-%S")
+# Use the new timestamp format with AM/PM for Excel filename
+timestamp = time.strftime("%Y-%m-%d_%I-%M-%S%p")
 excel_filename = os.path.join(REPORTS_DIR, f"attendance_report_{timestamp}.xlsx")
 try:
     df_report.to_excel(excel_filename, index=False)
@@ -394,6 +425,7 @@ except Exception as e:
 
 # --- Send Emails to Absentees ---
 print("\nSending emails to absentees...")
+# Filter based on the final status in the generated DataFrame
 absentees = df_report[df_report['Status'] == 'Absent']
 
 if not EMAIL_SENDER or "@" not in EMAIL_SENDER or not EMAIL_PASSWORD or EMAIL_PASSWORD == "your_app_password":
@@ -421,7 +453,8 @@ else:
                     continue
 
                 subject = "Absence Notification - Attendance System"
-                body = f"Dear {recipient_name},\n\nYou were marked as absent by the automated attendance system for the session on {time.strftime('%Y-%m-%d at %H:%M:%S')}.\n\nPlease contact the instructor/administrator if you believe this is an error.\n\nRegards,\nAttendance System"
+                current_time_str = time.strftime('%Y-%m-%d at %I:%M:%S %p')
+                body = f"Dear {recipient_name},\n\nYou were marked as absent by the automated attendance system for the session on {current_time_str}.\n\nPlease contact the instructor/administrator if you believe this is an error.\n\nRegards,\nAttendance System"
 
                 em = EmailMessage()
                 em['From'] = EMAIL_SENDER
