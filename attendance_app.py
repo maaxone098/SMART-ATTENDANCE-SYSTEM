@@ -114,18 +114,26 @@ except Exception as e:
 
 # --- Load Student Data (for email lookup) ---
 print(f"Loading student data from {STUDENT_CSV}...")
-student_data = {}
+student_info_map = {} # Store a dictionary for each student: {'StudentEmailAddress': ..., 'ParentEmailAddress': ...}
 df_students = None
 try:
     df_students = pd.read_csv(STUDENT_CSV, skipinitialspace=True)
-    df_students.columns = df_students.columns.str.strip()
-    if 'Name' in df_students.columns:
-        df_students['Name'] = df_students['Name'].str.strip()
-        student_data = pd.Series(df_students.EmailAddress.values, index=df_students.Name).to_dict()
-        print(f"Loaded data for {len(student_data)} students from CSV.")
+    df_students.columns = df_students.columns.str.strip() # Strip header spaces
+    # Ensure required columns exist
+    required_cols = ['Name', 'StudentEmailAddress', 'ParentEmailAddress']
+    if not all(col in df_students.columns for col in required_cols):
+        print(f"Error: {STUDENT_CSV} must contain columns: {', '.join(required_cols)}")
+        df_students = None # Invalidate df_students to prevent further errors
     else:
-        print(f"Error: 'Name' column not found in {STUDENT_CSV}.")
-        df_students = None
+        df_students['Name'] = df_students['Name'].str.strip()
+        for index, row in df_students.iterrows():
+            name = row['Name']
+            student_info_map[name] = {
+                'StudentID': row.get('StudentID', 'N/A'), # Handle if StudentID is missing
+                'StudentEmailAddress': row['StudentEmailAddress'],
+                'ParentEmailAddress': row['ParentEmailAddress']
+            }
+        print(f"Loaded data for {len(student_info_map)} students from CSV.")
 
 except FileNotFoundError:
     print(f"Warning: {STUDENT_CSV} not found. Cannot look up StudentID/Email.")
@@ -387,34 +395,31 @@ attendance_list = []
 print(f"Generating report for {len(unique_stripped_names)} unique names found in encodings file.")
 
 for name in unique_stripped_names:
-     # Status is based on the final state of attendance_status
      status = attendance_status.get(name, 'Absent')
      student_id = 'N/A'
-     email = 'N/A'
+     student_email = 'N/A' # Renamed for clarity
+     parent_email = 'N/A'  # New variable
      found_in_csv = False
 
-     if df_students is not None and name in student_data:
-         student_row = df_students[df_students['Name'] == name]
-         if not student_row.empty:
-            student_id = student_row['StudentID'].iloc[0]
-            email = student_row['EmailAddress'].iloc[0]
-            found_in_csv = True
+     if name in student_info_map: # Use the new map
+         info = student_info_map[name]
+         student_id = info.get('StudentID', 'N/A')
+         student_email = info.get('StudentEmailAddress', 'N/A')
+         parent_email = info.get('ParentEmailAddress', 'N/A')
+         found_in_csv = True
 
      if not found_in_csv:
          print(f"  DEBUG: Could not find details for '{name}' in {STUDENT_CSV}. Using N/A.")
 
-     # Get final recorded duration
      duration_seen = recognition_duration.get(name, 0.0)
      duration_min = duration_seen / 60.0
-
-     # Add ONLY duration in minutes to the report
      attendance_list.append({'StudentID': student_id, 'Name': name,
-                             'EmailAddress': email, 'Status': status,
+                             'StudentEmailAddress': student_email, # Changed column name
+                             'ParentEmailAddress': parent_email,   # Added new column
+                             'Status': status,
                              'DurationSeen_min': round(duration_min, 2)})
 
-
 df_report = pd.DataFrame(attendance_list)
-# Use the new timestamp format with AM/PM for Excel filename
 timestamp = time.strftime("%Y-%m-%d_%I-%M-%S%p")
 excel_filename = os.path.join(REPORTS_DIR, f"attendance_report_{timestamp}.xlsx")
 try:
@@ -425,7 +430,6 @@ except Exception as e:
 
 # --- Send Emails to Absentees ---
 print("\nSending emails to absentees...")
-# Filter based on the final status in the generated DataFrame
 absentees = df_report[df_report['Status'] == 'Absent']
 
 if not EMAIL_SENDER or "@" not in EMAIL_SENDER or not EMAIL_PASSWORD or EMAIL_PASSWORD == "your_app_password":
@@ -434,9 +438,8 @@ if not EMAIL_SENDER or "@" not in EMAIL_SENDER or not EMAIL_PASSWORD or EMAIL_PA
 elif absentees.empty:
     print("No absentees found.")
 else:
-    sent_count = 0
-    error_count = 0
-    skipped_count = 0
+    sent_count_student = 0; sent_count_parent = 0
+    error_count = 0; skipped_count = 0
     print(f"Attempting to send emails via {EMAIL_SERVER}:{EMAIL_PORT} as {EMAIL_SENDER}...")
     context = ssl.create_default_context()
     try:
@@ -445,55 +448,68 @@ else:
             server.login(EMAIL_SENDER, EMAIL_PASSWORD)
             print("Logged into email server successfully.")
             for index, row in absentees.iterrows():
-                recipient_email = row['EmailAddress']
+                student_email = row['StudentEmailAddress']
+                parent_email = row['ParentEmailAddress']
                 recipient_name = row['Name']
-                if pd.isna(recipient_email) or not isinstance(recipient_email, str) or "@" not in recipient_email or "." not in recipient_email.split('@')[-1]:
-                    print(f"Skipping email for {recipient_name} (invalid or missing email address: '{recipient_email}').")
-                    skipped_count += 1
-                    continue
-
-                subject = "Absence Notification - Attendance System"
                 current_time_str = time.strftime('%Y-%m-%d at %I:%M:%S %p')
-                body = f"Dear {recipient_name},\n\nYou were marked as absent by the automated attendance system for the session on {current_time_str}.\n\nPlease contact the instructor/administrator if you believe this is an error.\n\nRegards,\nAttendance System"
+                
+                # --- Send to Student ---
+                if pd.notna(student_email) and isinstance(student_email, str) and "@" in student_email:
+                    subject_student = "Absence Notification - Attendance System"
+                    body_student = f"Dear {recipient_name},\n\nYou were marked as absent by the automated attendance system for the session on {current_time_str}.\n\nPlease contact the instructor/administrator if you believe this is an error.\n\nRegards,\nAttendance System"
+                    em_student = EmailMessage()
+                    em_student['From'] = EMAIL_SENDER
+                    em_student['To'] = student_email
+                    em_student['Subject'] = subject_student
+                    em_student.set_content(body_student)
+                    try:
+                        print(f"Sending email to student {recipient_name} ({student_email})...")
+                        server.send_message(em_student)
+                        print(f"  > Email to student sent successfully.")
+                        sent_count_student += 1
+                    except Exception as e_send_student:
+                        print(f"  > Failed to send email to student {recipient_name}: {e_send_student}")
+                        error_count += 1
+                    time.sleep(0.5) # Small delay
+                else:
+                    print(f"Skipping email for student {recipient_name} (invalid or missing student email).")
+                    skipped_count +=1
 
-                em = EmailMessage()
-                em['From'] = EMAIL_SENDER
-                em['To'] = recipient_email
-                em['Subject'] = subject
-                em.set_content(body)
-
-                try:
-                    print(f"Sending email to {recipient_name} ({recipient_email})...")
-                    server.sendmail(EMAIL_SENDER, recipient_email, em.as_string())
-                    print(f"  > Email sent successfully.")
-                    sent_count += 1
-                except smtplib.SMTPRecipientsRefused:
-                     print(f"  > Failed: Recipient address refused ({recipient_email}).")
-                     error_count += 1
-                except Exception as e:
-                    print(f"  > Failed to send email to {recipient_name}: {e}")
-                    error_count += 1
-                time.sleep(1.5)
+                # --- Send to Parent ---
+                if pd.notna(parent_email) and isinstance(parent_email, str) and "@" in parent_email:
+                    subject_parent = f"Absence Notification for {recipient_name} - Attendance System"
+                    body_parent = f"Dear Parent/Guardian of {recipient_name},\n\nThis is to inform you that {recipient_name} was marked as absent by the automated attendance system for the class session on {current_time_str}.\n\nPlease contact the instructor/administrator for further details if needed.\n\nRegards,\nAttendance System"
+                    em_parent = EmailMessage()
+                    em_parent['From'] = EMAIL_SENDER
+                    em_parent['To'] = parent_email
+                    em_parent['Subject'] = subject_parent
+                    em_parent.set_content(body_parent)
+                    try:
+                        print(f"Sending email to parent of {recipient_name} ({parent_email})...")
+                        server.send_message(em_parent)
+                        print(f"  > Email to parent sent successfully.")
+                        sent_count_parent += 1
+                    except Exception as e_send_parent:
+                        print(f"  > Failed to send email to parent of {recipient_name}: {e_send_parent}")
+                        error_count += 1
+                    time.sleep(1.0) # Slightly longer delay before next student
+                else:
+                    print(f"Skipping email for parent of {recipient_name} (invalid or missing parent email).")
+                    # No skipped_count increment here if student email was also skipped
 
     except smtplib.SMTPAuthenticationError:
-        print("\nSMTP Authentication Error:")
-        print("  - Double-check EMAIL_SENDER and EMAIL_PASSWORD.")
-        print("  - If using Gmail with 2FA, ensure EMAIL_PASSWORD is an App Password.")
-        print("  - If not using 2FA, you might need to enable 'Less Secure App Access' in Gmail settings (less recommended).")
-        error_count = len(absentees) - sent_count - skipped_count
+        print("\nSMTP Authentication Error...") # (rest of error messages same as before)
+        error_count = len(absentees)*2 - sent_count_student - sent_count_parent - skipped_count
     except smtplib.SMTPConnectError:
-         print(f"\nSMTP Connection Error: Could not connect to server {EMAIL_SERVER}:{EMAIL_PORT}.")
-         print("  - Check server address and port.")
-         print("  - Check firewall settings.")
-         error_count = len(absentees) - sent_count - skipped_count
+         print(f"\nSMTP Connection Error...")
+         error_count = len(absentees)*2 - sent_count_student - sent_count_parent - skipped_count
     except ssl.SSLError as e:
          print(f"\nSSL Error during SMTP connection: {e}")
-         print("  - This might be a certificate issue or configuration problem.")
-         error_count = len(absentees) - sent_count - skipped_count
+         error_count = len(absentees)*2 - sent_count_student - sent_count_parent - skipped_count
     except Exception as e:
         print(f"\nFailed to connect to email server or send emails: {e}")
-        error_count = len(absentees) - sent_count - skipped_count
+        error_count = len(absentees)*2 - sent_count_student - sent_count_parent - skipped_count
 
-    print(f"\nEmail Summary: Sent={sent_count}, Failed={error_count}, Skipped={skipped_count}")
+    print(f"\nEmail Summary: Student Emails Sent={sent_count_student}, Parent Emails Sent={sent_count_parent}, Failed={error_count}, Skipped (due to missing address)={skipped_count}")
 
 print("\nApplication finished.")
